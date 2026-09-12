@@ -4,7 +4,6 @@ import sqlite3
 
 st.set_page_config(page_title="Material Tracker Intelligence", page_icon="📦", layout="wide")
 
-# ---- Custom styling ----
 st.markdown("""
 <style>
 .kpi-card {
@@ -31,20 +30,22 @@ if uploaded_file is None:
     st.info("👆 Upload a file to get started")
     st.stop()
 
-df = pd.read_excel(uploaded_file, sheet_name="Material Tracker", header=2)
+df = pd.read_excel(uploaded_file, sheet_name="Material Tracker", header=0)
+df = df.loc[:, df.columns.notna()]
+
 df.columns = [
-    "serial_no", "building", "package", "description", "uom",
-    "boq_qty", "actual_qty", "approved_make", "po_number", "po_date",
-    "vendor_name", "vendor_contact", "tds_approval_date_bl", "tds_approved_actual_date",
-    "mfg_clearance_bl_date", "mfg_clearance_actual_date", "approval_status",
-    "place_of_origin", "lead_time_days", "expected_dispatch_date",
-    "expected_delivery_date", "bl_delivery_date", "need_date_at_site",
-    "float_days", "delivered_qty", "remarks", "need_date_cup_recovery"
+    "serial_no", "building", "package", "power_turn_on_support", "description", "uom",
+    "boq_qty", "actual_qty", "delivered_qty", "delivery_completed_pct", "total_partial",
+    "approved_make", "po_number", "po_date", "vendor_name", "vendor_contact",
+    "tds_approval_date_bl", "tds_approved_actual_date", "mfg_clearance_bl_date",
+    "mfg_clearance_actual_date", "approval_status", "sea_air", "place_of_origin",
+    "lead_time_days", "expected_dispatch_date", "expected_delivery_date",
+    "revised_expected_delivery_date", "bl_delivery_date", "need_date_at_site",
+    "float_days", "remarks", "on_site", "mep_store_warehouse", "vendor_container_facility"
 ]
 df = df.dropna(subset=["serial_no"])
 df.to_sql("material_tracker", conn, if_exists="replace", index=False)
 
-# ---- KPI row ----
 total_items = len(df)
 total_packages = df["package"].nunique()
 at_risk = len(df[df["float_days"] < 0])
@@ -62,7 +63,6 @@ with c4:
 
 st.write("")
 
-# ---- Tabs ----
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "⚠️ At-Risk", "🔍 By Package", "🏢 By Building", "🔎 Ask"])
 
 with tab1:
