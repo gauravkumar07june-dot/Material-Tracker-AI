@@ -16,6 +16,10 @@ st.markdown("""
     background: linear-gradient(135deg, #7A1F1F 0%, #B03A2E 100%);
     padding: 20px; border-radius: 12px; color: white; text-align: center;
 }
+.good-card {
+    background: linear-gradient(135deg, #1F5C2E 0%, #2E8B4E 100%);
+    padding: 20px; border-radius: 12px; color: white; text-align: center;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,6 +65,22 @@ with c3:
 with c4:
     st.markdown(f'<div class="kpi-card"><p class="kpi-value">{approved_pct}%</p><p class="kpi-label">Approved</p></div>', unsafe_allow_html=True)
 
+po_issued = df["po_number"].notna().sum()
+avg_delivery_pct = round(df["delivery_completed_pct"].mean() * 100, 1) if df["delivery_completed_pct"].max() <= 1 else round(df["delivery_completed_pct"].mean(), 1)
+on_site_count = int(df["on_site"].sum()) if df["on_site"].dtype == bool else len(df[df["on_site"] == True])
+avg_lead_time = round(df["lead_time_days"].mean(), 1)
+
+st.write("")
+d1, d2, d3, d4 = st.columns(4)
+with d1:
+    st.markdown(f'<div class="good-card"><p class="kpi-value">{po_issued}</p><p class="kpi-label">POs Issued</p></div>', unsafe_allow_html=True)
+with d2:
+    st.markdown(f'<div class="good-card"><p class="kpi-value">{avg_delivery_pct}%</p><p class="kpi-label">Avg Delivery Completed</p></div>', unsafe_allow_html=True)
+with d3:
+    st.markdown(f'<div class="good-card"><p class="kpi-value">{on_site_count}</p><p class="kpi-label">Items On Site</p></div>', unsafe_allow_html=True)
+with d4:
+    st.markdown(f'<div class="good-card"><p class="kpi-value">{avg_lead_time}</p><p class="kpi-label">Avg Lead Time (days)</p></div>', unsafe_allow_html=True)
+
 st.write("")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "⚠️ At-Risk", "🔍 By Package", "🏢 By Building", "🔎 Ask"])
@@ -104,22 +124,97 @@ with tab4:
     st.dataframe(df_building, use_container_width=True)
 
 with tab5:
-    question = st.text_input("Try: 'negative float', 'package count', 'HVAC', 'not approved'")
+    st.caption("Try: 'negative float', 'delivery completed', 'PO issued', 'pending approval', "
+               "'vendor Rittal', 'building CUP', 'average lead time', 'on site', 'sea vs air'")
+    question = st.text_input("Ask a question about your tracker")
+
     if question:
         q = question.lower()
+        result = None
+
         if "negative float" in q or "behind schedule" in q or "at risk" in q:
             result = pd.read_sql("""
                 SELECT package, COUNT(*) AS count FROM material_tracker
                 WHERE float_days < 0 GROUP BY package ORDER BY count DESC
             """, conn)
-        elif "package count" in q:
+
+        elif "delivery" in q and ("complet" in q or "%" in q or "percent" in q):
+            result = pd.read_sql("""
+                SELECT package, ROUND(AVG(delivery_completed_pct) * 100, 1) AS avg_delivery_pct,
+                       SUM(delivered_qty) AS total_delivered, SUM(boq_qty) AS total_boq_qty
+                FROM material_tracker GROUP BY package ORDER BY avg_delivery_pct ASC
+            """, conn)
+
+        elif "po issued" in q or "how many po" in q or "purchase order" in q:
+            result = pd.read_sql("""
+                SELECT package, COUNT(po_number) AS po_issued_count,
+                       COUNT(*) - COUNT(po_number) AS po_pending_count
+                FROM material_tracker GROUP BY package ORDER BY po_pending_count DESC
+            """, conn)
+
+        elif "package count" in q or "how many packages" in q:
             result = pd.read_sql("SELECT COUNT(DISTINCT package) AS total_packages FROM material_tracker", conn)
-        elif "not approved" in q or "pending" in q:
+
+        elif "not approved" in q or "pending approval" in q or ("pending" in q and "po" not in q):
             result = pd.read_sql("""
                 SELECT package, COUNT(*) AS pending_count FROM material_tracker
                 WHERE approval_status IS NULL OR approval_status != 'Approved'
                 GROUP BY package ORDER BY pending_count DESC
             """, conn)
+
+        elif "vendor" in q:
+            words = q.replace("vendor", "").strip()
+            result = pd.read_sql(
+                "SELECT * FROM material_tracker WHERE vendor_name LIKE ?",
+                conn, params=(f"%{words}%",)
+            )
+
+        elif "building" in q:
+            words = q.replace("building", "").strip()
+            result = pd.read_sql(
+                "SELECT * FROM material_tracker WHERE building LIKE ?",
+                conn, params=(f"%{words}%",)
+            )
+
+        elif "average lead time" in q or "avg lead time" in q:
+            result = pd.read_sql("""
+                SELECT package, ROUND(AVG(lead_time_days), 1) AS avg_lead_time
+                FROM material_tracker GROUP BY package ORDER BY avg_lead_time DESC
+            """, conn)
+
+        elif "on site" in q:
+            result = pd.read_sql("""
+                SELECT package, COUNT(*) AS on_site_count
+                FROM material_tracker WHERE on_site = 1
+                GROUP BY package ORDER BY on_site_count DESC
+            """, conn)
+
+        elif "sea" in q or "air" in q:
+            result = pd.read_sql("""
+                SELECT sea_air, COUNT(*) AS count
+                FROM material_tracker GROUP BY sea_air
+            """, conn)
+
+        elif "total qty" in q or "boq qty" in q or "quantity" in q:
+            result = pd.read_sql("""
+                SELECT package, SUM(boq_qty) AS total_boq_qty, SUM(actual_qty) AS total_actual_qty
+                FROM material_tracker GROUP BY package ORDER BY total_boq_qty DESC
+            """, conn)
+
+        elif "approved" in q:
+            result = pd.read_sql("""
+                SELECT approval_status, COUNT(*) AS count
+                FROM material_tracker GROUP BY approval_status
+            """, conn)
+
         else:
-            result = pd.read_sql("SELECT * FROM material_tracker WHERE package LIKE ?", conn, params=(f"%{question}%",))
-        st.dataframe(result, use_container_width=True, hide_index=True)
+            result = pd.read_sql("""
+                SELECT * FROM material_tracker
+                WHERE package LIKE ? OR vendor_name LIKE ? OR description LIKE ?
+            """, conn, params=(f"%{question}%", f"%{question}%", f"%{question}%"))
+
+        if result is not None:
+            if len(result) > 0:
+                st.dataframe(result, use_container_width=True, hide_index=True)
+            else:
+                st.write("No matching data found for that question.")
